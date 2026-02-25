@@ -1,0 +1,63 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Ecoguard Insight",
+        "description": "Enter your Ecoguard credentials",
+        "data": {
+          "username": "Rentable Object Number",
+          "password": "Password",
+          "database": "Database Name"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid credentials"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "month_1_name": { "name": "Month 1 Name" },
+      "month_1_kwh": { "name": "Month 1 kWh" },
+      "month_1_cost": { "name": "Month 1 Cost" },
+      "month_2_name": { "name": "Month 2 Name" },
+      "month_2_kwh": { "name": "Month 2 kWh" },
+      "month_2_cost": { "name": "Month 2 Cost" },
+      "month_3_name": { "name": "Month 3 Name" },
+      "month_3_kwh": { "name": "Month 3 kWh" },
+      "month_3_cost": { "name": "Month 3 Cost" },
+      "month_4_name": { "name": "Month 4 Name" },
+      "month_4_kwh": { "name": "Month 4 kWh" },
+      "month_4_cost": { "name": "Month 4 Cost" },
+      "month_5_name": { "name": "Month 5 Name" },
+      "month_5_kwh": { "name": "Month 5 kWh" },
+      "month_5_cost": { "name": "Month 5 Cost" },
+      "month_6_name": { "name": "Month 6 Name" },
+      "month_6_kwh": { "name": "Month 6 kWh" },
+      "month_6_cost": { "name": "Month 6 Cost" },
+      "month_7_name": { "name": "Month 7 Name" },
+      "month_7_kwh": { "name": "Month 7 kWh" },
+      "month_7_cost": { "name": "Month 7 Cost" },
+      "month_8_name": { "name": "Month 8 Name" },
+      "month_8_kwh": { "name": "Month 8 kWh" },
+      "month_8_cost": { "name": "Month 8 Cost" },
+      "month_9_name": { "name": "Month 9 Name" },
+      "month_9_kwh": { "name": "Month 9 kWh" },
+      "month_9_cost": { "name": "Month 9 Cost" },
+      "month_10_name": { "name": "Month 10 Name" },
+      "month_10_kwh": { "name": "Month 10 kWh" },
+      "month_10_cost": { "name": "Month 10 Cost" },
+      "month_11_name": { "name": "Month 11 Name" },
+      "month_11_kwh": { "name": "Month 11 kWh" },
+      "month_11_cost": { "name": "Month 11 Cost" },
+      "month_12_name": { "name": "Month 12 Name" },
+      "month_12_kwh": { "name": "Month 12 kWh" },
+      "month_12_cost": { "name": "Month 12 Cost" },
+      "current_month_total_kwh": { "name": "Current Month Total kWh" },
+      "current_month_day_count": { "name": "Current Month Day Count" },
+      "today_kwh": { "name": "Today kWh" },
+      "price_per_kwh": { "name": "Price per kWh" },
+      "price_valid_from": { "name": "Price Valid From" }
+    }
+  }
+}
