@@ -15,20 +15,30 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor"]
 
-STATISTIC_ID = f"{DOMAIN}:energy_consumption"
-
-METADATA = StatisticMetaData(
+ENERGY_METADATA = StatisticMetaData(
     mean_type=StatisticMeanType.NONE,
     has_sum=True,
     name="Ecoguard Energy Consumption",
     source=DOMAIN,
-    statistic_id=STATISTIC_ID,
+    statistic_id=f"{DOMAIN}:energy_consumption",
     unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
     unit_class="energy",
 )
 
+COST_METADATA = StatisticMetaData(
+    mean_type=StatisticMeanType.NONE,
+    has_sum=True,
+    name="Ecoguard Energy Cost",
+    source=DOMAIN,
+    statistic_id=f"{DOMAIN}:energy_cost",
+    unit_of_measurement="SEK",
+    unit_class=None,
+)
 
-def _build_statistics(entries: list[tuple[datetime, float]]) -> list[StatisticData]:
+
+def _build_energy_statistics(
+    entries: list[tuple[datetime, float]],
+) -> list[StatisticData]:
     accumulated = 0.0
     statistics: list[StatisticData] = []
     for dt, kwh in entries:
@@ -37,13 +47,36 @@ def _build_statistics(entries: list[tuple[datetime, float]]) -> list[StatisticDa
     return statistics
 
 
+def _build_cost_statistics(
+    entries: list[tuple[datetime, float, float]],
+) -> list[StatisticData]:
+    accumulated = 0.0
+    statistics: list[StatisticData] = []
+    for dt, kwh, rate in entries:
+        cost = kwh * rate
+        accumulated += cost
+        statistics.append(StatisticData(start=dt, state=cost, sum=accumulated))
+    return statistics
+
+
 def _import_statistics(hass: HomeAssistant, coordinator: EcoguardCoordinator) -> None:
-    entries = coordinator.historical_entries
-    if not entries:
+    energy_entries = coordinator.historical_entries
+    if not energy_entries:
         return
-    statistics = _build_statistics(entries)
-    async_add_external_statistics(hass, METADATA, statistics)
-    _LOGGER.debug("Imported %d statistics entries", len(statistics))
+
+    energy_stats = _build_energy_statistics(energy_entries)
+    async_add_external_statistics(hass, ENERGY_METADATA, energy_stats)
+
+    cost_entries = coordinator.historical_cost_entries
+    if cost_entries:
+        cost_stats = _build_cost_statistics(cost_entries)
+        async_add_external_statistics(hass, COST_METADATA, cost_stats)
+
+    _LOGGER.debug(
+        "Imported %d energy and %d cost statistics",
+        len(energy_stats),
+        len(cost_entries),
+    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
