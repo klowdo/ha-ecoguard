@@ -101,6 +101,7 @@ async def _async_login(
 
 class EcoguardCoordinator(DataUpdateCoordinator[dict]):
     historical_entries: list[tuple[datetime, float]]
+    historical_cost_entries: list[tuple[datetime, float, float]]
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
@@ -115,8 +116,10 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
         self._domain_path = _build_domain_path(self._database, self._username)
         self._session: aiohttp.ClientSession | None = None
         self._cached_month_entries: list[tuple[datetime, float]] = []
+        self._cached_month_rates: dict[tuple[int, int], float] = {}
         self._cached_months: set[tuple[int, int]] = set()
         self.historical_entries = []
+        self.historical_cost_entries = []
 
     async def async_shutdown(self) -> None:
         if self._session and not self._session.closed:
@@ -229,6 +232,12 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
                 year = int(parts[1])
             except ValueError:
                 continue
+
+            kwh_total = data.get(f"month_{i}_kwh")
+            cost_total = data.get(f"month_{i}_cost")
+            if kwh_total and cost_total:
+                self._cached_month_rates[(year, month_num)] = cost_total / kwh_total
+
             if (year, month_num) not in self._cached_months:
                 ts = int(datetime(year, month_num, 1, tzinfo=TZ_STOCKHOLM).timestamp())
                 new_months.append((year, month_num, ts))
@@ -248,7 +257,9 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
 
             self._cached_months.add((year, month_num))
 
+        current_rate = data.get("price_per_kwh", 0.0) or 0.0
         today = datetime.now(TZ_STOCKHOLM).date()
+
         current_entries: list[tuple[datetime, float]] = []
         for entry in data.get("current_month_daily", []):
             date_str = entry.get("date")
@@ -290,6 +301,12 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
         all_entries = self._cached_month_entries + current_entries + hourly_entries
         all_entries.sort(key=lambda x: x[0])
         self.historical_entries = all_entries
+
+        cost_entries: list[tuple[datetime, float, float]] = []
+        for dt, kwh in all_entries:
+            rate = self._cached_month_rates.get((dt.year, dt.month), current_rate)
+            cost_entries.append((dt, kwh, rate))
+        self.historical_cost_entries = cost_entries
 
     async def _fetch_pricelists(
         self, session: aiohttp.ClientSession, data: dict
