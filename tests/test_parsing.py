@@ -39,6 +39,46 @@ def _parse_swedish_month(name: str) -> datetime | None:
     return datetime(year, month_num, 1, tzinfo=TZ_STOCKHOLM)
 
 
+def _parse_daily_table(html: str) -> list[tuple[str, float]]:
+    soup = BeautifulSoup(html, "html.parser")
+    tbody = soup.find("tbody")
+    if not tbody:
+        return []
+    rows = []
+    for row in tbody.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 2:
+            continue
+        date_str = cells[0].get_text(strip=True)
+        kwh = _safe_float(cells[1].get_text(strip=True))
+        if kwh is not None:
+            rows.append((date_str, kwh))
+    return rows
+
+
+def _build_energy_statistics(
+    entries: list[tuple[datetime, float]],
+) -> list[dict]:
+    accumulated = 0.0
+    statistics = []
+    for dt, kwh in entries:
+        accumulated += kwh
+        statistics.append({"start": dt, "state": kwh, "sum": accumulated})
+    return statistics
+
+
+def _build_cost_statistics(
+    entries: list[tuple[datetime, float, float]],
+) -> list[dict]:
+    accumulated = 0.0
+    statistics = []
+    for dt, kwh, rate in entries:
+        cost = kwh * rate
+        accumulated += cost
+        statistics.append({"start": dt, "state": cost, "sum": accumulated})
+    return statistics
+
+
 class TestSafeFloat:
     def test_swedish_decimal(self):
         assert _safe_float("213,0") == 213.0
@@ -148,6 +188,13 @@ class TestYearlyTableParsing:
             assert dt is not None
             assert dt.tzinfo == TZ_STOCKHOLM
 
+    def test_rate_derivation(self):
+        data = self._parse_table(self.SAMPLE_HTML)
+        rate_feb = data["month_1_cost"] / data["month_1_kwh"]
+        rate_jan = data["month_3_cost"] / data["month_3_kwh"]
+        assert round(rate_feb, 4) == round(190.85 / 213.0, 4)
+        assert round(rate_jan, 2) == 1.88
+
 
 class TestMonthlyTableParsing:
     SAMPLE_HTML = """
@@ -222,6 +269,85 @@ class TestMonthlyTableParsing:
             assert dt.tzinfo == TZ_STOCKHOLM
 
 
+class TestParseDailyTable:
+    SAMPLE_HTML = """
+    <table>
+        <tbody>
+            <tr><td>2025-03-01</td><td>7,000</td></tr>
+            <tr><td>2025-03-02</td><td>9,000</td></tr>
+            <tr><td>2025-03-03</td><td>-</td></tr>
+            <tr><td>2025-03-04</td><td>11,000</td></tr>
+        </tbody>
+    </table>
+    """
+
+    def test_parses_rows(self):
+        rows = _parse_daily_table(self.SAMPLE_HTML)
+        assert len(rows) == 3
+
+    def test_skips_dash_values(self):
+        rows = _parse_daily_table(self.SAMPLE_HTML)
+        dates = [r[0] for r in rows]
+        assert "2025-03-03" not in dates
+
+    def test_values(self):
+        rows = _parse_daily_table(self.SAMPLE_HTML)
+        assert rows[0] == ("2025-03-01", 7.0)
+        assert rows[1] == ("2025-03-02", 9.0)
+        assert rows[2] == ("2025-03-04", 11.0)
+
+    def test_no_tbody(self):
+        assert _parse_daily_table("<table></table>") == []
+
+    def test_empty_tbody(self):
+        assert _parse_daily_table("<table><tbody></tbody></table>") == []
+
+    def test_single_cell_rows_skipped(self):
+        html = "<table><tbody><tr><td>only one</td></tr></tbody></table>"
+        assert _parse_daily_table(html) == []
+
+
+class TestHourlyTableParsing:
+    SAMPLE_HTML = """
+    <table>
+        <tbody>
+            <tr><td>00:00-01:00</td><td>1,000</td></tr>
+            <tr><td>01:00-02:00</td><td>0,000</td></tr>
+            <tr><td>02:00-03:00</td><td>0,000</td></tr>
+            <tr><td>03:00-04:00</td><td>1,000</td></tr>
+        </tbody>
+    </table>
+    """
+
+    def test_parse_hour_from_range(self):
+        soup = BeautifulSoup(self.SAMPLE_HTML, "html.parser")
+        rows = soup.find("tbody").find_all("tr")
+        hours = []
+        for row in rows:
+            time_range = row.find_all("td")[0].get_text(strip=True)
+            hour = int(time_range.split(":")[0])
+            hours.append(hour)
+        assert hours == [0, 1, 2, 3]
+
+    def test_parse_kwh_values(self):
+        soup = BeautifulSoup(self.SAMPLE_HTML, "html.parser")
+        rows = soup.find("tbody").find_all("tr")
+        values = []
+        for row in rows:
+            kwh = _safe_float(row.find_all("td")[1].get_text(strip=True))
+            values.append(kwh)
+        assert values == [1.0, 0.0, 0.0, 1.0]
+
+    def test_total(self):
+        soup = BeautifulSoup(self.SAMPLE_HTML, "html.parser")
+        rows = soup.find("tbody").find_all("tr")
+        total = sum(
+            _safe_float(row.find_all("td")[1].get_text(strip=True))
+            for row in rows
+        )
+        assert total == 2.0
+
+
 class TestPricelistParsing:
     SAMPLE_JSON = {
         "StatusCode": "0",
@@ -246,3 +372,99 @@ class TestPricelistParsing:
 
     def test_empty_pricelists(self):
         assert len({"PriceLists": []}["PriceLists"]) == 0
+
+
+class TestBuildEnergyStatistics:
+    def test_empty(self):
+        assert _build_energy_statistics([]) == []
+
+    def test_accumulation(self):
+        entries = [
+            (datetime(2025, 3, 1, tzinfo=TZ_STOCKHOLM), 7.0),
+            (datetime(2025, 3, 2, tzinfo=TZ_STOCKHOLM), 9.0),
+            (datetime(2025, 3, 3, tzinfo=TZ_STOCKHOLM), 5.0),
+        ]
+        stats = _build_energy_statistics(entries)
+        assert len(stats) == 3
+        assert stats[0]["state"] == 7.0
+        assert stats[0]["sum"] == 7.0
+        assert stats[1]["state"] == 9.0
+        assert stats[1]["sum"] == 16.0
+        assert stats[2]["state"] == 5.0
+        assert stats[2]["sum"] == 21.0
+
+    def test_preserves_timestamps(self):
+        dt1 = datetime(2025, 6, 1, tzinfo=TZ_STOCKHOLM)
+        dt2 = datetime(2025, 6, 2, tzinfo=TZ_STOCKHOLM)
+        stats = _build_energy_statistics([(dt1, 3.0), (dt2, 4.0)])
+        assert stats[0]["start"] == dt1
+        assert stats[1]["start"] == dt2
+
+    def test_single_entry(self):
+        stats = _build_energy_statistics(
+            [(datetime(2025, 1, 1, tzinfo=TZ_STOCKHOLM), 42.0)]
+        )
+        assert stats[0]["state"] == 42.0
+        assert stats[0]["sum"] == 42.0
+
+
+class TestBuildCostStatistics:
+    def test_empty(self):
+        assert _build_cost_statistics([]) == []
+
+    def test_cost_calculation(self):
+        entries = [
+            (datetime(2025, 3, 1, tzinfo=TZ_STOCKHOLM), 7.0, 0.90),
+            (datetime(2025, 3, 2, tzinfo=TZ_STOCKHOLM), 9.0, 0.90),
+            (datetime(2025, 3, 3, tzinfo=TZ_STOCKHOLM), 5.0, 1.88),
+        ]
+        stats = _build_cost_statistics(entries)
+        assert len(stats) == 3
+        assert stats[0]["state"] == 7.0 * 0.90
+        assert stats[0]["sum"] == 7.0 * 0.90
+        assert stats[1]["state"] == 9.0 * 0.90
+        assert stats[1]["sum"] == 7.0 * 0.90 + 9.0 * 0.90
+        assert stats[2]["state"] == 5.0 * 1.88
+        assert stats[2]["sum"] == 7.0 * 0.90 + 9.0 * 0.90 + 5.0 * 1.88
+
+    def test_different_rates_per_entry(self):
+        entries = [
+            (datetime(2025, 1, 1, tzinfo=TZ_STOCKHOLM), 10.0, 1.0),
+            (datetime(2025, 2, 1, tzinfo=TZ_STOCKHOLM), 10.0, 2.0),
+        ]
+        stats = _build_cost_statistics(entries)
+        assert stats[0]["state"] == 10.0
+        assert stats[1]["state"] == 20.0
+        assert stats[1]["sum"] == 30.0
+
+    def test_zero_kwh(self):
+        entries = [
+            (datetime(2025, 1, 1, tzinfo=TZ_STOCKHOLM), 0.0, 1.88),
+        ]
+        stats = _build_cost_statistics(entries)
+        assert stats[0]["state"] == 0.0
+        assert stats[0]["sum"] == 0.0
+
+
+class TestCostRateDerivation:
+    def test_rate_from_monthly_totals(self):
+        monthly_kwh = 213.0
+        monthly_cost = 190.85
+        rate = monthly_cost / monthly_kwh
+        assert round(rate, 4) == round(0.8960, 4)
+
+    def test_rate_changes_between_months(self):
+        rates = {
+            (2025, 2): 190.85 / 213.0,
+            (2026, 1): 507.60 / 270.0,
+        }
+        assert round(rates[(2025, 2)], 2) == 0.90
+        assert round(rates[(2026, 1)], 2) == 1.88
+
+    def test_fallback_to_current_rate(self):
+        cached_rates = {(2025, 2): 0.90}
+        current_rate = 1.88
+        dt_known = datetime(2025, 2, 15, tzinfo=TZ_STOCKHOLM)
+        dt_unknown = datetime(2026, 2, 15, tzinfo=TZ_STOCKHOLM)
+        assert cached_rates.get((dt_known.year, dt_known.month), current_rate) == 0.90
+        assert cached_rates.get((dt_unknown.year, dt_unknown.month), current_rate) == 1.88

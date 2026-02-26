@@ -137,25 +137,24 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self) -> dict:
         try:
             session = await self._new_session()
-
-            data: dict = {}
-            for name, fetch in [
-                ("yearly", self._fetch_yearly),
-                ("monthly", self._fetch_monthly),
-                ("pricelists", self._fetch_pricelists),
-                ("historical", self._fetch_historical),
-            ]:
-                try:
-                    await fetch(session, data)
-                except Exception:
-                    _LOGGER.exception("Failed to fetch %s data", name)
-
-            return data
-
         except ConfigEntryAuthFailed:
             raise
         except Exception as err:
-            raise UpdateFailed(f"Error fetching data: {err}") from err
+            raise UpdateFailed(f"Login failed: {err}") from err
+
+        data: dict = {}
+        for name, fetch in [
+            ("yearly", self._fetch_yearly),
+            ("monthly", self._fetch_monthly),
+            ("pricelists", self._fetch_pricelists),
+            ("historical", self._fetch_historical),
+        ]:
+            try:
+                await fetch(session, data)
+            except Exception:
+                _LOGGER.exception("Failed to fetch %s data", name)
+
+        return data
 
     async def _fetch_yearly(
         self, session: aiohttp.ClientSession, data: dict
