@@ -139,10 +139,17 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             session = await self._new_session()
 
             data: dict = {}
-            await self._fetch_yearly(session, data)
-            await self._fetch_monthly(session, data)
-            await self._fetch_pricelists(session, data)
-            await self._fetch_historical(session, data)
+            for name, fetch in [
+                ("yearly", self._fetch_yearly),
+                ("monthly", self._fetch_monthly),
+                ("pricelists", self._fetch_pricelists),
+                ("historical", self._fetch_historical),
+            ]:
+                try:
+                    await fetch(session, data)
+                except Exception:
+                    _LOGGER.exception("Failed to fetch %s data", name)
+
             return data
 
         except ConfigEntryAuthFailed:
