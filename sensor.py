@@ -18,6 +18,15 @@ from .const import DOMAIN
 from .coordinator import EcoguardCoordinator
 
 
+def _device_info(entry: ConfigEntry) -> dict:
+    return {
+        "identifiers": {(DOMAIN, entry.entry_id)},
+        "name": "Ecoguard Insight",
+        "manufacturer": "Ecoguard",
+        "entry_type": DeviceEntryType.SERVICE,
+    }
+
+
 @dataclass(frozen=True, kw_only=True)
 class EcoguardSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], float | str | None] = lambda data: None
@@ -73,7 +82,6 @@ SENSOR_DESCRIPTIONS: list[EcoguardSensorDescription] = [
         key="today_kwh",
         translation_key="today_kwh",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-        device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=1,
         value_fn=lambda data: data.get("today_kwh"),
@@ -119,12 +127,7 @@ class EcoguardSensor(CoordinatorEntity[EcoguardCoordinator], SensorEntity):
         super().__init__(coordinator)
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Ecoguard Insight",
-            "manufacturer": "Ecoguard",
-            "entry_type": DeviceEntryType.SERVICE,
-        }
+        self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self) -> float | str | None:
