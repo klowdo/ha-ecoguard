@@ -100,7 +100,11 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
 
     async def _async_update_data(self) -> dict:
         try:
-            session = await self._ensure_session()
+            if self._session and not self._session.closed:
+                await self._session.close()
+            jar = aiohttp.CookieJar(unsafe=True)
+            self._session = aiohttp.ClientSession(cookie_jar=jar)
+            session = self._session
             await _async_login(session, self._username, self._password, self._database)
 
             data: dict = {}
@@ -159,11 +163,13 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
         today_date = None
         day_count = len(rows)
 
+        daily_entries = []
         for row in rows:
             cells = row.find_all("td")
             if len(cells) >= 2:
                 date_text = cells[0].get_text(strip=True)
                 kwh_val = _safe_float(cells[1].get_text(strip=True))
+                daily_entries.append({"date": date_text, "kwh": kwh_val})
                 if kwh_val is not None:
                     total_kwh += kwh_val
                     today_kwh = kwh_val
@@ -171,6 +177,7 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
 
         data["current_month_total_kwh"] = round(total_kwh, 3)
         data["current_month_day_count"] = day_count
+        data["current_month_daily"] = daily_entries
         data["today_kwh"] = today_kwh
         data["today_date"] = today_date
 
