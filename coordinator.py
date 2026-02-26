@@ -1,6 +1,7 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 import unicodedata
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -15,6 +16,14 @@ from .const import BASE_URL, CONF_DATABASE, CONF_PASSWORD, CONF_USERNAME, LOGIN_
 _LOGGER = logging.getLogger(__name__)
 
 UPDATE_INTERVAL = timedelta(hours=1)
+
+TZ_STOCKHOLM = ZoneInfo("Europe/Stockholm")
+
+SWEDISH_MONTHS = {
+    "januari": 1, "februari": 2, "mars": 3, "april": 4,
+    "maj": 5, "juni": 6, "juli": 7, "augusti": 8,
+    "september": 9, "oktober": 10, "november": 11, "december": 12,
+}
 
 
 def _strip_diacritics(text: str) -> str:
@@ -32,6 +41,23 @@ def _safe_float(value: str) -> float | None:
 def _build_domain_path(database: str, username: str) -> str:
     url_database = _strip_diacritics(database)
     return f"/domains/{url_database}/objects/{username}"
+
+
+def _parse_daily_table(html: str) -> list[tuple[str, float]]:
+    soup = BeautifulSoup(html, "html.parser")
+    tbody = soup.find("tbody")
+    if not tbody:
+        return []
+    rows = []
+    for row in tbody.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 2:
+            continue
+        date_str = cells[0].get_text(strip=True)
+        kwh = _safe_float(cells[1].get_text(strip=True))
+        if kwh is not None:
+            rows.append((date_str, kwh))
+    return rows
 
 
 async def async_validate_credentials(
@@ -74,6 +100,8 @@ async def _async_login(
 
 
 class EcoguardCoordinator(DataUpdateCoordinator[dict]):
+    historical_entries: list[tuple[datetime, float]]
+
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
             hass,
@@ -86,31 +114,32 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
         self._database = entry.data[CONF_DATABASE]
         self._domain_path = _build_domain_path(self._database, self._username)
         self._session: aiohttp.ClientSession | None = None
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            jar = aiohttp.CookieJar(unsafe=True)
-            self._session = aiohttp.ClientSession(cookie_jar=jar)
-        return self._session
+        self._cached_month_entries: list[tuple[datetime, float]] = []
+        self._cached_months: set[tuple[int, int]] = set()
+        self.historical_entries = []
 
     async def async_shutdown(self) -> None:
         if self._session and not self._session.closed:
             await self._session.close()
         await super().async_shutdown()
 
+    async def _new_session(self) -> aiohttp.ClientSession:
+        if self._session and not self._session.closed:
+            await self._session.close()
+        jar = aiohttp.CookieJar(unsafe=True)
+        self._session = aiohttp.ClientSession(cookie_jar=jar)
+        await _async_login(self._session, self._username, self._password, self._database)
+        return self._session
+
     async def _async_update_data(self) -> dict:
         try:
-            if self._session and not self._session.closed:
-                await self._session.close()
-            jar = aiohttp.CookieJar(unsafe=True)
-            self._session = aiohttp.ClientSession(cookie_jar=jar)
-            session = self._session
-            await _async_login(session, self._username, self._password, self._database)
+            session = await self._new_session()
 
             data: dict = {}
             await self._fetch_yearly(session, data)
             await self._fetch_monthly(session, data)
             await self._fetch_pricelists(session, data)
+            await self._fetch_historical(session, data)
             return data
 
         except ConfigEntryAuthFailed:
@@ -180,6 +209,87 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
         data["current_month_daily"] = daily_entries
         data["today_kwh"] = today_kwh
         data["today_date"] = today_date
+
+    async def _fetch_historical(
+        self, session: aiohttp.ClientSession, data: dict
+    ) -> None:
+        month_count = data.get("yearly_month_count", 0)
+        new_months: list[tuple[int, int, int]] = []
+        for i in range(1, month_count + 1):
+            name = data.get(f"month_{i}_name")
+            if not name:
+                continue
+            parts = name.lower().split()
+            if len(parts) != 2:
+                continue
+            month_num = SWEDISH_MONTHS.get(parts[0])
+            if not month_num:
+                continue
+            try:
+                year = int(parts[1])
+            except ValueError:
+                continue
+            if (year, month_num) not in self._cached_months:
+                ts = int(datetime(year, month_num, 1, tzinfo=TZ_STOCKHOLM).timestamp())
+                new_months.append((year, month_num, ts))
+
+        for year, month_num, ts in new_months:
+            url = f"{BASE_URL}{self._domain_path}/consumption/ViewMonthTable/{ts}?UtilityCode=ELEC"
+            async with session.get(url) as resp:
+                resp.raise_for_status()
+                html = await resp.text()
+
+            for date_str, kwh in _parse_daily_table(html):
+                try:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=TZ_STOCKHOLM)
+                except ValueError:
+                    continue
+                self._cached_month_entries.append((dt, kwh))
+
+            self._cached_months.add((year, month_num))
+
+        today = datetime.now(TZ_STOCKHOLM).date()
+        current_entries: list[tuple[datetime, float]] = []
+        for entry in data.get("current_month_daily", []):
+            date_str = entry.get("date")
+            kwh = entry.get("kwh")
+            if not date_str or kwh is None:
+                continue
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=TZ_STOCKHOLM)
+            except ValueError:
+                continue
+            if dt.date() == today:
+                continue
+            current_entries.append((dt, kwh))
+
+        hourly_url = f"{BASE_URL}{self._domain_path}/consumption/ViewLatestDayTable?utilityCode=ELEC"
+        async with session.get(hourly_url) as resp:
+            resp.raise_for_status()
+            hourly_html = await resp.text()
+
+        hourly_soup = BeautifulSoup(hourly_html, "html.parser")
+        hourly_tbody = hourly_soup.find("tbody")
+        hourly_entries: list[tuple[datetime, float]] = []
+        if hourly_tbody:
+            for row in hourly_tbody.find_all("tr"):
+                cells = row.find_all("td")
+                if len(cells) < 2:
+                    continue
+                time_range = cells[0].get_text(strip=True)
+                kwh = _safe_float(cells[1].get_text(strip=True))
+                if kwh is None:
+                    continue
+                try:
+                    hour = int(time_range.split(":")[0])
+                except ValueError:
+                    continue
+                dt = datetime(today.year, today.month, today.day, hour, tzinfo=TZ_STOCKHOLM)
+                hourly_entries.append((dt, kwh))
+
+        all_entries = self._cached_month_entries + current_entries + hourly_entries
+        all_entries.sort(key=lambda x: x[0])
+        self.historical_entries = all_entries
 
     async def _fetch_pricelists(
         self, session: aiohttp.ClientSession, data: dict
