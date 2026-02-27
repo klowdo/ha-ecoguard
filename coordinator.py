@@ -60,6 +60,36 @@ def _parse_daily_table(html: str) -> list[tuple[str, float]]:
     return rows
 
 
+def _parse_hourly_rolling(html: str, now: datetime) -> list[tuple[datetime, float]]:
+    soup = BeautifulSoup(html, "html.parser")
+    tbody = soup.find("tbody")
+    if not tbody:
+        return []
+
+    today = now.date()
+    yesterday = today - timedelta(days=1)
+    entries: list[tuple[datetime, float]] = []
+
+    for row in tbody.find_all("tr"):
+        cells = row.find_all("td")
+        if len(cells) < 2:
+            continue
+        time_range = cells[0].get_text(strip=True)
+        kwh = _safe_float(cells[1].get_text(strip=True))
+        if kwh is None:
+            continue
+        try:
+            hour = int(time_range.split(":")[0])
+        except ValueError:
+            continue
+
+        day = yesterday if hour >= now.hour else today
+        dt = datetime(day.year, day.month, day.day, hour, tzinfo=TZ_STOCKHOLM)
+        entries.append((dt, kwh))
+
+    return entries
+
+
 async def async_validate_credentials(
     username: str, password: str, database: str
 ) -> None:
@@ -264,7 +294,9 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             self._cached_months.add((year, month_num))
 
         current_rate = data.get("price_per_kwh", 0.0) or 0.0
-        today = datetime.now(TZ_STOCKHOLM).date()
+        now = datetime.now(TZ_STOCKHOLM)
+        today = now.date()
+        yesterday = today - timedelta(days=1)
 
         current_entries: list[tuple[datetime, float]] = []
         for entry in data.get("current_month_daily", []):
@@ -285,24 +317,7 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             resp.raise_for_status()
             hourly_html = await resp.text()
 
-        hourly_soup = BeautifulSoup(hourly_html, "html.parser")
-        hourly_tbody = hourly_soup.find("tbody")
-        hourly_entries: list[tuple[datetime, float]] = []
-        if hourly_tbody:
-            for row in hourly_tbody.find_all("tr"):
-                cells = row.find_all("td")
-                if len(cells) < 2:
-                    continue
-                time_range = cells[0].get_text(strip=True)
-                kwh = _safe_float(cells[1].get_text(strip=True))
-                if kwh is None:
-                    continue
-                try:
-                    hour = int(time_range.split(":")[0])
-                except ValueError:
-                    continue
-                dt = datetime(today.year, today.month, today.day, hour, tzinfo=TZ_STOCKHOLM)
-                hourly_entries.append((dt, kwh))
+        hourly_entries = _parse_hourly_rolling(hourly_html, now)
 
         all_entries = self._cached_month_entries + current_entries + hourly_entries
         all_entries.sort(key=lambda x: x[0])
