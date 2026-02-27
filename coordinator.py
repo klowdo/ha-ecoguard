@@ -227,8 +227,6 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
 
         rows = tbody.find_all("tr")
         total_kwh = 0.0
-        today_kwh = None
-        today_date = None
         day_count = len(rows)
 
         daily_entries = []
@@ -240,14 +238,10 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
                 daily_entries.append({"date": date_text, "kwh": kwh_val})
                 if kwh_val is not None:
                     total_kwh += kwh_val
-                    today_kwh = kwh_val
-                    today_date = date_text
 
         data["current_month_total_kwh"] = round(total_kwh, 3)
         data["current_month_day_count"] = day_count
         data["current_month_daily"] = daily_entries
-        data["today_kwh"] = today_kwh
-        data["today_date"] = today_date
 
     async def _fetch_historical(
         self, session: aiohttp.ClientSession, data: dict
@@ -318,6 +312,10 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             hourly_html = await resp.text()
 
         hourly_entries = _parse_hourly_rolling(hourly_html, now)
+
+        data["today_kwh"] = round(
+            sum(kwh for dt, kwh in hourly_entries if dt.date() == today), 3
+        )
 
         all_entries = self._cached_month_entries + current_entries + hourly_entries
         all_entries.sort(key=lambda x: x[0])
