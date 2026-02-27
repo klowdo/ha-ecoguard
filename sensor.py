@@ -30,6 +30,7 @@ def _device_info(entry: ConfigEntry) -> dict:
 @dataclass(frozen=True, kw_only=True)
 class EcoguardSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], float | str | None] = lambda data: None
+    historical: bool = False
 
 
 def _month_sensors() -> list[EcoguardSensorDescription]:
@@ -39,6 +40,7 @@ def _month_sensors() -> list[EcoguardSensorDescription]:
             EcoguardSensorDescription(
                 key=f"month_{i}_name",
                 translation_key=f"month_{i}_name",
+                historical=True,
                 value_fn=lambda data, idx=i: data.get(f"month_{idx}_name"),
             ),
             EcoguardSensorDescription(
@@ -47,6 +49,7 @@ def _month_sensors() -> list[EcoguardSensorDescription]:
                 native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
                 device_class=SensorDeviceClass.ENERGY,
                 suggested_display_precision=1,
+                historical=True,
                 value_fn=lambda data, idx=i: data.get(f"month_{idx}_kwh"),
             ),
             EcoguardSensorDescription(
@@ -55,6 +58,7 @@ def _month_sensors() -> list[EcoguardSensorDescription]:
                 native_unit_of_measurement="SEK",
                 device_class=SensorDeviceClass.MONETARY,
                 suggested_display_precision=2,
+                historical=True,
                 value_fn=lambda data, idx=i: data.get(f"month_{idx}_cost"),
             ),
         ])
@@ -128,6 +132,14 @@ class EcoguardSensor(CoordinatorEntity[EcoguardCoordinator], SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{entry.entry_id}_{description.key}"
         self._attr_device_info = _device_info(entry)
+
+    @property
+    def available(self) -> bool:
+        if self.coordinator.last_update_success:
+            return True
+        if self.entity_description.historical and self.coordinator.data is not None:
+            return self.entity_description.value_fn(self.coordinator.data) is not None
+        return False
 
     @property
     def native_value(self) -> float | str | None:
