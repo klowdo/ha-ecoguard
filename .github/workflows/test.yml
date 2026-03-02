@@ -16,6 +16,6 @@ jobs:
         with:
           python-version: "3.13"
 
-      - run: pip install pytest beautifulsoup4
+      - run: pip install -r requirements_test.txt
 
       - run: pytest tests/ -v
