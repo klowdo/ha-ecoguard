@@ -1,1 +1,1 @@
-collect_ignore = ["../"]
+collect_ignore = ["../custom_components/"]

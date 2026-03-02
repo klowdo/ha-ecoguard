@@ -14,7 +14,7 @@ for mod in [
 ]:
     sys.modules.setdefault(mod, ha_mock)
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from custom_components.ecoguard.coordinator import _parse_hourly_rolling, TZ_STOCKHOLM
 
 

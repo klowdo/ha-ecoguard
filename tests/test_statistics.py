@@ -28,7 +28,7 @@ for mod in [
 models_mod = sys.modules["homeassistant.components.recorder.models"]
 models_mod.StatisticData = StatisticData
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from custom_components.ecoguard.__init__ import (
     _build_cost_statistics,
     _build_energy_statistics,
