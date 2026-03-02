@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
 from homeassistant.components.recorder.models.statistics import StatisticMeanType
+from homeassistant.components.recorder import get_instance as get_recorder
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
@@ -77,14 +78,17 @@ def _get_last_stat(
     return start, last.get("sum", 0.0)
 
 
-def _import_statistics(hass: HomeAssistant, coordinator: EcoguardCoordinator) -> None:
+async def _async_import_statistics(
+    hass: HomeAssistant, coordinator: EcoguardCoordinator
+) -> None:
     try:
         energy_entries = coordinator.historical_entries
         if not energy_entries:
             return
 
-        last_energy_start, last_energy_sum = _get_last_stat(
-            hass, f"{DOMAIN}:energy_consumption"
+        recorder = get_recorder(hass)
+        last_energy_start, last_energy_sum = await recorder.async_add_executor_job(
+            _get_last_stat, hass, f"{DOMAIN}:energy_consumption"
         )
         if last_energy_start is not None:
             energy_entries = [(dt, kwh) for dt, kwh in energy_entries if dt > last_energy_start]
@@ -95,8 +99,8 @@ def _import_statistics(hass: HomeAssistant, coordinator: EcoguardCoordinator) ->
 
         cost_entries = coordinator.historical_cost_entries
         if cost_entries:
-            last_cost_start, last_cost_sum = _get_last_stat(
-                hass, f"{DOMAIN}:energy_cost"
+            last_cost_start, last_cost_sum = await recorder.async_add_executor_job(
+                _get_last_stat, hass, f"{DOMAIN}:energy_cost"
             )
             if last_cost_start is not None:
                 cost_entries = [(dt, kwh, rate) for dt, kwh, rate in cost_entries if dt > last_cost_start]
@@ -122,11 +126,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     def _on_update():
         if entry.options.get(CONF_IMPORT_HISTORY, True):
-            hass.async_add_executor_job(_import_statistics, hass, coordinator)
+            hass.async_create_task(_async_import_statistics(hass, coordinator))
 
     coordinator.async_add_listener(_on_update)
     if entry.options.get(CONF_IMPORT_HISTORY, True):
-        await hass.async_add_executor_job(_import_statistics, hass, coordinator)
+        await _async_import_statistics(hass, coordinator)
 
     return True
 

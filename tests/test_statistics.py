@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -30,11 +31,25 @@ models_mod.StatisticData = StatisticData
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from custom_components.ecoguard.__init__ import (
+    _async_import_statistics,
     _build_cost_statistics,
     _build_energy_statistics,
     _get_last_stat,
-    _import_statistics,
 )
+
+
+def _run(coro):
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+async def _fake_executor_job(fn, *args):
+    return fn(*args)
+
+
+def _mock_recorder():
+    recorder = MagicMock()
+    recorder.async_add_executor_job = _fake_executor_job
+    return recorder
 
 
 def _dt(hour: int) -> datetime:
@@ -103,9 +118,10 @@ def test_import_statistics_first_run():
     coordinator.historical_entries = [(_dt(0), 1.0), (_dt(1), 2.0)]
     coordinator.historical_cost_entries = [(_dt(0), 1.0, 0.5)]
 
-    with patch("custom_components.ecoguard.__init__.get_last_statistics", return_value={}), \
+    with patch("custom_components.ecoguard.__init__.get_recorder", return_value=_mock_recorder()), \
+         patch("custom_components.ecoguard.__init__.get_last_statistics", return_value={}), \
          patch("custom_components.ecoguard.__init__.async_add_external_statistics") as mock_add:
-        _import_statistics(hass, coordinator)
+        _run(_async_import_statistics(hass, coordinator))
 
     assert mock_add.call_count == 2
     energy_stats = mock_add.call_args_list[0][0][2]
@@ -121,9 +137,10 @@ def test_import_statistics_incremental():
     energy_id = "ecoguard:energy_consumption"
     last_stats = {energy_id: [{"start": _dt(1), "sum": 10.0}]}
 
-    with patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=last_stats), \
+    with patch("custom_components.ecoguard.__init__.get_recorder", return_value=_mock_recorder()), \
+         patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=last_stats), \
          patch("custom_components.ecoguard.__init__.async_add_external_statistics") as mock_add:
-        _import_statistics(hass, coordinator)
+        _run(_async_import_statistics(hass, coordinator))
 
     assert mock_add.call_count == 1
     energy_stats = mock_add.call_args_list[0][0][2]
@@ -141,9 +158,10 @@ def test_import_statistics_incremental_with_float_timestamp():
     energy_id = "ecoguard:energy_consumption"
     last_stats = {energy_id: [{"start": _dt(1).timestamp(), "sum": 10.0}]}
 
-    with patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=last_stats), \
+    with patch("custom_components.ecoguard.__init__.get_recorder", return_value=_mock_recorder()), \
+         patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=last_stats), \
          patch("custom_components.ecoguard.__init__.async_add_external_statistics") as mock_add:
-        _import_statistics(hass, coordinator)
+        _run(_async_import_statistics(hass, coordinator))
 
     assert mock_add.call_count == 1
     energy_stats = mock_add.call_args_list[0][0][2]
@@ -160,8 +178,9 @@ def test_import_statistics_no_new_entries():
     energy_id = "ecoguard:energy_consumption"
     last_stats = {energy_id: [{"start": _dt(1), "sum": 10.0}]}
 
-    with patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=last_stats), \
+    with patch("custom_components.ecoguard.__init__.get_recorder", return_value=_mock_recorder()), \
+         patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=last_stats), \
          patch("custom_components.ecoguard.__init__.async_add_external_statistics") as mock_add:
-        _import_statistics(hass, coordinator)
+        _run(_async_import_statistics(hass, coordinator))
 
     mock_add.assert_not_called()
