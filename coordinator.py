@@ -246,6 +246,8 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
     async def _fetch_historical(
         self, session: aiohttp.ClientSession, data: dict
     ) -> None:
+        now = datetime.now(TZ_STOCKHOLM)
+        current_ym = (now.year, now.month)
         month_count = data.get("yearly_month_count", 0)
         new_months: list[tuple[int, int, int]] = []
         for i in range(1, month_count + 1):
@@ -268,7 +270,7 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             if kwh_total and cost_total:
                 self._cached_month_rates[(year, month_num)] = cost_total / kwh_total
 
-            if (year, month_num) not in self._cached_months:
+            if (year, month_num) not in self._cached_months and (year, month_num) != current_ym:
                 ts = int(datetime(year, month_num, 1, tzinfo=TZ_STOCKHOLM).timestamp())
                 new_months.append((year, month_num, ts))
 
@@ -288,7 +290,6 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             self._cached_months.add((year, month_num))
 
         current_rate = data.get("price_per_kwh", 0.0) or 0.0
-        now = datetime.now(TZ_STOCKHOLM)
         today = now.date()
         yesterday = today - timedelta(days=1)
 
@@ -317,7 +318,11 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             sum(kwh for dt, kwh in hourly_entries if dt.date() == today), 3
         )
 
-        all_entries = self._cached_month_entries + current_entries + hourly_entries
+        all_entries = [
+            (dt, kwh)
+            for dt, kwh in self._cached_month_entries + current_entries + hourly_entries
+            if kwh >= 0
+        ]
         all_entries.sort(key=lambda x: x[0])
         self.historical_entries = all_entries
 
