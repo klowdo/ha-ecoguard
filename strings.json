@@ -15,6 +15,16 @@
       "invalid_auth": "Invalid credentials"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Ecoguard Options",
+        "data": {
+          "import_history": "Import energy history into Home Assistant statistics"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "month_1_name": { "name": "Month 1 Name" },
