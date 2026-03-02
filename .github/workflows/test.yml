@@ -18,4 +18,4 @@ jobs:
 
       - run: pip install pytest beautifulsoup4
 
-      - run: pytest tests/ -v --rootdir=tests
+      - run: pytest tests/ -v
