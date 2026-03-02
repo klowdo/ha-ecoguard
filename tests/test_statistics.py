@@ -86,6 +86,17 @@ def test_get_last_stat_with_data():
     assert total == 42.0
 
 
+def test_get_last_stat_converts_float_timestamp():
+    hass = MagicMock()
+    stat_id = "ecoguard:energy_consumption"
+    ts = _dt(5).timestamp()
+    mock_result = {stat_id: [{"start": ts, "sum": 42.0}]}
+    with patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=mock_result):
+        start, total = _get_last_stat(hass, stat_id)
+    assert start == _dt(5)
+    assert total == 42.0
+
+
 def test_import_statistics_first_run():
     hass = MagicMock()
     coordinator = MagicMock()
@@ -119,6 +130,25 @@ def test_import_statistics_incremental():
     assert len(energy_stats) == 1
     assert energy_stats[0].sum == 13.0
     assert energy_stats[0].state == 3.0
+
+
+def test_import_statistics_incremental_with_float_timestamp():
+    hass = MagicMock()
+    coordinator = MagicMock()
+    coordinator.historical_entries = [(_dt(0), 1.0), (_dt(1), 2.0), (_dt(2), 3.0)]
+    coordinator.historical_cost_entries = []
+
+    energy_id = "ecoguard:energy_consumption"
+    last_stats = {energy_id: [{"start": _dt(1).timestamp(), "sum": 10.0}]}
+
+    with patch("custom_components.ecoguard.__init__.get_last_statistics", return_value=last_stats), \
+         patch("custom_components.ecoguard.__init__.async_add_external_statistics") as mock_add:
+        _import_statistics(hass, coordinator)
+
+    assert mock_add.call_count == 1
+    energy_stats = mock_add.call_args_list[0][0][2]
+    assert len(energy_stats) == 1
+    assert energy_stats[0].sum == 13.0
 
 
 def test_import_statistics_no_new_entries():

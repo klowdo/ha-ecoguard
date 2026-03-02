@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
 from homeassistant.components.recorder.models.statistics import StatisticMeanType
@@ -71,7 +71,10 @@ def _get_last_stat(
     if not result or statistic_id not in result:
         return None, 0.0
     last = result[statistic_id][0]
-    return last["start"], last.get("sum", 0.0)
+    start = last["start"]
+    if isinstance(start, (int, float)):
+        start = datetime.fromtimestamp(start, tz=UTC)
+    return start, last.get("sum", 0.0)
 
 
 def _import_statistics(hass: HomeAssistant, coordinator: EcoguardCoordinator) -> None:
