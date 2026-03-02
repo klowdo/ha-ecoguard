@@ -318,6 +318,11 @@ class EcoguardCoordinator(DataUpdateCoordinator[dict]):
             sum(kwh for dt, kwh in hourly_entries if dt.date() == today), 3
         )
 
+        hourly_dates = {dt.date() for dt, _ in hourly_entries}
+        current_entries = [
+            (dt, kwh) for dt, kwh in current_entries if dt.date() not in hourly_dates
+        ]
+
         all_entries = [
             (dt, kwh)
             for dt, kwh in self._cached_month_entries + current_entries + hourly_entries
